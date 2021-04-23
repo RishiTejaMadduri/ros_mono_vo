@@ -2,6 +2,7 @@
 #define __MONOODOM_H__
 
 #include<iostream>
+#include<queue>
 #include <ros/ros.h>
 #include <opencv2/opencv.hpp>
 #include <sensor_msgs/CameraInfo.h>
@@ -16,14 +17,14 @@
 class monoodom
 {
     public:
-    void monoodom();
-    bool convertImages(const sensor_msgs::ImageConstPtr& Img, const sensor_msgs::ImageConstPtr& Img2 = nullptr, cv::Mat& cvImg1, cv::Mat& cvImg2);
-    void getCalib(const sensor_msgs::CameraInfoConstptr& info);
+    monoodom();
+    bool convertImages(const sensor_msgs::ImageConstPtr& Img, const sensor_msgs::ImageConstPtr& Img2 = nullptr);
+    void getCalib(const sensor_msgs::CameraInfoPtr& info);
     void kptsBucketing(std::vector<cv::KeyPoint>& srcKpts, std::vector<cv::KeyPoint>& dstKpts, int width, int height);
     void SelectKeyPoints(cv::Mat& Img1, std::vector<cv::KeyPoint>& keyPoints);
     void FeatureMatching(cv::Mat& Img1, cv::Mat& Img2, std::vector<cv::KeyPoint>& keyPoints1, std::vector<cv::KeyPoint>& keyPoints2, std::vector<uchar>& status);
     void featureDetection(cv::Mat& Img1, std::vector<cv::KeyPoint>& keyPoints);
-    void imageCallBack(const sensor_msgs::ImageConstPtr& Img1, const sensor_msgs::ImageConstPtr& Img2 = nullptr, int n_frame);
+    void imageCallBack(const sensor_msgs::ImageConstPtr& Img1);
     void visualize(int n_frame);
     
 
@@ -38,10 +39,11 @@ class monoodom
     bool odomInit;
     bool calibInit;
     
+    std::queue<sensor_msgs::ImageConstPtr>image_cache;
     int max_features;
     int min_points;
     int max_frames;
-    int min_points;
+    int n_frame;
     int idx;
 
     double scale, focal;
@@ -53,7 +55,7 @@ class monoodom
     cv::Mat prev_R, prev_T, curr_R, curr_T;
     cv::Mat E;
     cv::Mat mask;
-    
+    cv::Mat Img1, Img2;
     cv_bridge::CvImagePtr cv_ptr;
 
     std::map<int, cv::KeyPoint>prev_points_map;

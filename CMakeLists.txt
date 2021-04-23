@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(MonoVO)
+project(ros_mono_vo)
 
 ## Compile as C++11, supported in ROS Kinetic and newer
-# add_compile_options(-std=c++11)
+add_compile_options(-std=c++11)
 
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
@@ -205,6 +205,12 @@ include_directories(
 # catkin_add_gtest(${PROJECT_NAME}-test test/test_MonoVO.cpp)
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
+
+add_executable(ros_mono_vo src/mono_vo.cpp)
+
+target_link_libraries(ros_mono_vo 
+	${catkin_LIBRARIES}
+	)
 # endif()
 
 ## Add folders to be run by python nosetests

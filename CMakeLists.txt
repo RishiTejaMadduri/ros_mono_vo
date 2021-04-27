@@ -108,10 +108,10 @@ find_package(catkin REQUIRED COMPONENTS
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-#  INCLUDE_DIRS include
-#  LIBRARIES MonoVO
-#  CATKIN_DEPENDS cmake_modules cv_bridge image_geometry image_transport roscpp rospy std_msgs tf
-#  DEPENDS system_lib
+  INCLUDE_DIRS include
+  LIBRARIES MonoVO
+  CATKIN_DEPENDS cmake_modules cv_bridge image_geometry image_transport roscpp rospy std_msgs tf
+  DEPENDS system_lib
 )
 
 ###########
@@ -206,11 +206,11 @@ include_directories(
 # if(TARGET ${PROJECT_NAME}-test)
 #   target_link_libraries(${PROJECT_NAME}-test ${PROJECT_NAME})
 
-add_executable(ros_mono_vo src/mono_vo.cpp)
-
-target_link_libraries(ros_mono_vo 
-	${catkin_LIBRARIES}
-	)
+add_executable(ros_mono_vo 
+	src/mono_vo.cpp
+	src/mono_odom.cpp
+)
+target_link_libraries(ros_mono_vo ${catkin_LIBRARIES})
 # endif()
 
 ## Add folders to be run by python nosetests

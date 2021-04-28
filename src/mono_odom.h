@@ -20,10 +20,9 @@ class monoodom
         monoodom();
         bool convertImages(const sensor_msgs::ImageConstPtr& Img, const sensor_msgs::ImageConstPtr& Img2);
         void getCalib(const sensor_msgs::CameraInfoConstPtr& info);
-        void kptsBucketing(std::vector<cv::KeyPoint>& srcKpts, std::vector<cv::KeyPoint>& dstKpts, int width, int height);
-        void SelectKeyPoints(cv::Mat& Img1, std::vector<cv::KeyPoint>& keyPoints);
-        void FeatureMatching(cv::Mat& Img1, cv::Mat& Img2, std::vector<cv::KeyPoint>& keyPoints1, std::vector<cv::KeyPoint>& keyPoints2, std::vector<uchar>& status);
-        void featureDetection(cv::Mat& Img1, std::vector<cv::KeyPoint>& keyPoints);
+        void kptsBucketing(std::vector<cv::Point2f>& srcKpts, std::vector<cv::KeyPoint>& dstKpts);
+        void FeatureMatching(cv::Mat& Img1, cv::Mat& Img2, std::vector<cv::Point2f>& keyPoints1, std::vector<cv::Point2f>& keyPoints2, std::vector<uchar>& status);
+        void FeatureDetection(cv::Mat& Img1, std::vector<cv::Point2f>& keyPoints);
         void imageCallBack(const sensor_msgs::ImageConstPtr& Img1);
         void visualize(int n_frame);
     
@@ -58,9 +57,9 @@ class monoodom
         cv::Mat Img1, Img2;
         cv_bridge::CvImagePtr cv_ptr;
 
-        std::map<int, cv::KeyPoint>prev_points_map;
-        std::vector<cv::KeyPoint>prev_points;
-        std::vector<cv::KeyPoint>curr_points;
+        std::map<int, cv::Point2f>prev_points_map;
+        std::vector<cv::Point2f>prev_points;
+        std::vector<cv::Point2f>curr_points;
         std::vector<uchar> status;
         std::vector<int>idx;
 };

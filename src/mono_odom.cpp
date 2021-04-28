@@ -9,6 +9,8 @@ monoodom::monoodom():
 it_(nh_)
 {
     camInfo_ = nh_.subscribe("/camera/rgb/camera_info", 1, &monoodom::getCalib, this);
+    
+    // if(calibInit)
     imageSub_ = it_.subscribe("/camera/rgb/image_raw", 2, &monoodom::imageCallBack, this, image_transport::TransportHints("compressed"));
     max_frames = INT_MAX;
 }
@@ -51,70 +53,54 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                     K.at<double>(i, j) = P.at<double>(i, j);
                 }
             }
+            std::cout<<"CALIBRATION DONE"<<std::endl;
             calibInit = true;
         }
 
     }
 
-    void monoodom::kptsBucketing(std::vector<cv::KeyPoint>& srcKpts, std::vector<cv::KeyPoint>& dstKpts, int width, int height)
+    void monoodom::kptsBucketing(std::vector<cv::Point2f>& srcKpts, std::vector<cv::KeyPoint>& dstKpts)
     {
-        const int maxFeatBuck = max_features/6;
-        std::vector<int>buckets(6, maxFeatBuck);
-
-        for(int i = 0; i<srcKpts.size(); i++)
+        for(int i = 0; i<min_points; i++)
         {
-            int id = 0;
-
-            if(srcKpts[i].pt.y <=height/2)
-                id = 0;
-            else
-                id = 3;
-
-            if(srcKpts[i].pt.x <= width/3)
-                id += 0;
-            else if(srcKpts[i].pt.x <= 2*width/3)
-                id += 1;
-            else
-                id += 2;
-
-            if(buckets[id]>0)
-            {
-                buckets[id]--;
-                dstKpts.push_back(srcKpts[i]);
-            }
+            srcKpts.push_back(dstKpts[i].pt);
         }
     }
 
-    void monoodom::SelectKeyPoints(cv::Mat& Img1, std::vector<cv::KeyPoint>& keyPoints)
+    void monoodom::FeatureDetection(cv::Mat& Img1, std::vector<cv::Point2f>& keyPoints)
     {
-        std::vector<cv::KeyPoint> kptsBuckted;
-        featureDetection(Img1, keyPoints);
 
-        std::sort(keyPoints.begin(), keyPoints.end(), score_comparator);
-        
-        const int width = Img1.cols;
-        const int height = Img1.rows;
-        kptsBucketing(keyPoints, kptsBuckted, width, height);
+        std::cout<<"featureDetection"<<std::endl;
+
+        std::vector<cv::KeyPoint> kptsBuckted;
+        int fast_threshold = 20;
+        bool nms = true;
+        FAST(Img1, kptsBuckted, fast_threshold, nms);
+
+        std::sort(kptsBuckted.begin(), kptsBuckted.end(), score_comparator);
+
+        kptsBucketing(keyPoints, kptsBuckted);
 
     }
 
-    void monoodom::FeatureMatching(cv::Mat& Img1, cv::Mat& Img2, std::vector<cv::KeyPoint>& keyPoints1, std::vector<cv::KeyPoint>& keyPoints2, std::vector<uchar>& status)
+    void monoodom::FeatureMatching(cv::Mat& Img1, cv::Mat& Img2, std::vector<cv::Point2f>& keyPoints1, std::vector<cv::Point2f>& keyPoints2, std::vector<uchar>& status)
     {
+        std::cout<<"Feature Matching"<<std::endl;
         std::vector<float>err;
         cv::Size winSize = cv::Size(21, 21);
 
         cv::TermCriteria termcrit=cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01);
 
         cv::calcOpticalFlowPyrLK(Img1, Img2, keyPoints1, keyPoints2, status, err, winSize, 3, termcrit, 0, 0.001);
-
+        std::cout<<"calcOpticalFlow"<<std::endl;
         int indexCorrection = 0;
 
         for(int i = 0; i<status.size(); i++)
         {
-            cv::KeyPoint kp = keyPoints2.at(i - indexCorrection);
-            if((status.at(i) == 0) || (kp.pt.x<0) || (kp.pt.y<0))
+            cv::Point2f kp = keyPoints2.at(i - indexCorrection);
+            if((status.at(i) == 0) || (kp.x<0) || (kp.y<0))
             {
-                if((kp.pt.x<0 || (kp.pt.y<0)))
+                if((kp.x<0 || (kp.y<0)))
                 {
                     status.at(i) = 0;
                 }
@@ -123,17 +109,13 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 indexCorrection++;
             }
         }
+        std::cout<<"End of For loop"<<std::endl;
     }
 
-    void monoodom::featureDetection(cv::Mat& Img1, std::vector<cv::KeyPoint>& keyPoints)
-    {
-        int fast_threshold = 20;
-        bool nms = true;
-        FAST(Img1, keyPoints, fast_threshold, nms);
-    }
 
     void monoodom::imageCallBack(const sensor_msgs::ImageConstPtr& Image1)
     {
+        std::cout<<"imageCallBack"<<std::endl;
         scale = 0.5;
 
         double flow = 0.0;
@@ -143,7 +125,10 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
             ROS_WARN("NO CALIB INFO FOUND");
             return;
         }
+
+        // std::cout<<image_cache.size()<<std::endl;
          image_cache.push(Image1);
+         
          if(!odomInit || n_frame<3)
          {
              if(image_cache.size()>2)
@@ -160,11 +145,12 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                         return;
                     }
 
-                    std::vector<cv::KeyPoint> points1, points2;
-                    SelectKeyPoints(Img1, points1);
+                    std::vector<cv::Point2f> points1, points2;
+                    FeatureDetection(Img1, points1);
                     FeatureMatching(Img1, Img2, points1, points2, status);
 
                     E = cv::findEssentialMat(points2, points1, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
+                    std::cout<<"FOUND E"<<std::endl;
                     cv::recoverPose(E, points2, points1, curr_R, curr_T, focal, pp, mask);
 
                     prev_image = Img2;
@@ -201,7 +187,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
             if(prev_points.size()<min_points)
             {
-                SelectKeyPoints(prev_image, prev_points);
+                FeatureDetection(prev_image, prev_points);
                 FeatureMatching(prev_image, curr_image, prev_points, curr_points, status);
             }
 
@@ -226,6 +212,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
     void monoodom::visualize(int n_frame)
     {
+        std::cout<<"visualize"<<std::endl;
         cv::Mat traj = cv::Mat::zeros(cv::Size(600,600), CV_8UC3);
         int visual_limit = 5000;
 
@@ -236,11 +223,11 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
         for(size_t i = 0; i<visual_limit; i++)
         {
-            cv::circle(traj, prev_points[i].pt, 2, cv::Scalar(0, 0, 255), 2);
-            cv::circle(traj, curr_points[i].pt, 2, cv::Scalar(255, 0, 0), 2);
+            cv::circle(traj, prev_points[i], 2, cv::Scalar(0, 0, 255), 2);
+            cv::circle(traj, curr_points[i], 2, cv::Scalar(255, 0, 0), 2);
         }
 
-        std::map<int, cv::KeyPoint>::iterator mit;
+        std::map<int, cv::Point2f>::iterator mit;
 
         for(int i = 0; i<visual_limit; i++)
         {
@@ -249,7 +236,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
             if(mit != prev_points_map.end())
             {
-                cv::arrowedLine(traj, curr_points[i].pt, mit->second.pt, cv::Scalar(255, 255, 255), 1, 16, 0, 0.1);
+                cv::arrowedLine(traj, curr_points[i], mit->second, cv::Scalar(255, 255, 255), 1, 16, 0, 0.1);
             }
         }
         // cv_ptr = image_taj;

@@ -12,27 +12,49 @@ it_(nh_)
     
     // if(calibInit)
     imageSub_ = it_.subscribe("/camera/rgb/image_raw", 2, &monoodom::imageCallBack, this, image_transport::TransportHints("compressed"));
+    imagePub_ = it_.advertise("/mono_vo/output", 1);
     max_frames = INT_MAX;
+    min_points = 50;
+    n_frame = 0;
 }
 
 bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sensor_msgs::ImageConstPtr& Image2 = nullptr)
 {
     cv_bridge::CvImageConstPtr cvbImg1, cvbImg2;
 
-    try
+    if(!Image2)
     {
-        cvbImg1 = cv_bridge::toCvShare(Image1);
-        cvbImg2 = cv_bridge::toCvShare(Image2);
+        try
+        {
+            cvbImg1 = cv_bridge::toCvShare(Image1);
+        }
+        catch(const std::exception& e)
+        {
+            ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
+            return false;
+        }
+        cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
+        return true;
     }
-    catch(const std::exception& e)
+    else
     {
-        ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
-        return false;
-    }
-    cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
-    cv::cvtColor(cvbImg2->image, Img2, cv::COLOR_BGR2GRAY);
+        try
+        {
+            cvbImg1 = cv_bridge::toCvShare(Image1);
+            cvbImg2 = cv_bridge::toCvShare(Image2);
+        }
+        catch(const std::exception& e)
+        {
+            ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
+            return false;
+        }
+        cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
+        cv::cvtColor(cvbImg2->image, Img2, cv::COLOR_BGR2GRAY);
 
-    return true;
+        return true;
+    }
+
+    return false;
 }
     void monoodom::getCalib(const sensor_msgs::CameraInfoConstPtr& info)
     {
@@ -61,10 +83,11 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
     void monoodom::kptsBucketing(std::vector<cv::Point2f>& srcKpts, std::vector<cv::KeyPoint>& dstKpts)
     {
-        for(int i = 0; i<min_points; i++)
+        for(int i = 0; i<50; i++)
         {
             srcKpts.push_back(dstKpts[i].pt);
         }
+        std::cout<<"kptsBucketing: srcKpts"<<srcKpts.size()<<std::endl;
     }
 
     void monoodom::FeatureDetection(cv::Mat& Img1, std::vector<cv::Point2f>& keyPoints)
@@ -78,7 +101,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
         FAST(Img1, kptsBuckted, fast_threshold, nms);
 
         std::sort(kptsBuckted.begin(), kptsBuckted.end(), score_comparator);
-
+        std::cout<<"Feature Detection: kptsBucketed"<<kptsBuckted.size()<<std::endl;
         kptsBucketing(keyPoints, kptsBuckted);
 
     }
@@ -89,8 +112,13 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
         std::vector<float>err;
         cv::Size winSize = cv::Size(21, 21);
 
+        std::cout<<"KeyPoints 1: "<<keyPoints1.size();
+        std::cout<<"KeyPoints 2: "<<keyPoints2.size()<<std::endl;
+        std::cout<<"Image 1 Channels: "<<Img1.channels()<<"Rows: "<<Img1.rows<<" "<<"Cols: "<<Img1.cols<<std::endl;
+        std::cout<<"Image 2 Channels: "<<Img2.channels()<<"Rows: "<<Img2.rows<<" "<<"Cols: "<<Img2.cols<<std::endl;
         cv::TermCriteria termcrit=cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01);
-
+        std::cout<<"OPT12"<<std::endl;
+ 
         cv::calcOpticalFlowPyrLK(Img1, Img2, keyPoints1, keyPoints2, status, err, winSize, 3, termcrit, 0, 0.001);
         std::cout<<"calcOpticalFlow"<<std::endl;
         int indexCorrection = 0;
@@ -129,7 +157,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
         // std::cout<<image_cache.size()<<std::endl;
          image_cache.push(Image1);
          
-         if(!odomInit || n_frame<3)
+         if(!odomInit && n_frame<2)
          {
              if(image_cache.size()>2)
              {
@@ -147,13 +175,15 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
                     std::vector<cv::Point2f> points1, points2;
                     FeatureDetection(Img1, points1);
+
                     FeatureMatching(Img1, Img2, points1, points2, status);
 
                     E = cv::findEssentialMat(points2, points1, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
-                    std::cout<<"FOUND E"<<std::endl;
                     cv::recoverPose(E, points2, points1, curr_R, curr_T, focal, pp, mask);
 
+                    std::cout<<"In Image Call back dims: "<<Img2.rows<<" "<<Img2.cols<<std::endl;
                     prev_image = Img2;
+                    std::cout<<"In Image Call back prev_image dims: "<<prev_image.rows<<" "<<prev_image.cols<<std::endl;
                     prev_points = points2;
 
                     prev_R = curr_R.clone();
@@ -161,55 +191,62 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
                     ROS_INFO(" INITIALIZED \n");
                     odomInit = true;
-                    return;
+                    n_frame = 2;
              }
          }
-
+         
          else
          {
-             if(n_frame>max_frames)
-                return;
-            
-            const sensor_msgs::ImageConstPtr Image1 = image_cache.front();
-            image_cache.pop();
-            convertImages(Image1);
+             
+             if(image_cache.size() == 2)
+             {
+                std::cout<<n_frame<<" "<<max_frames<<std::endl;
+                if(n_frame>max_frames)
+                    return;
 
-            FeatureMatching(prev_image, Img1, prev_points, curr_points, status);
+                const sensor_msgs::ImageConstPtr Image1 = image_cache.front();
+                image_cache.pop();
+                convertImages(Image1);
+        
+                FeatureMatching(prev_image, Img1, prev_points, curr_points, status);
+                E = cv::findEssentialMat(curr_points, prev_points, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
+                std::cout<<"Fidning E here"<<std::endl;
+                cv::recoverPose(E, curr_points, prev_points, curr_R, curr_T, focal, pp, mask);
 
-            E = cv::findEssentialMat(curr_points, prev_points, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
-            cv::recoverPose(E, curr_points, prev_points, curr_R, curr_T, focal, pp, mask);
+                if((scale>0.1) && (curr_T.at<double>(2)>curr_T.at<double>(0) && (curr_T.at<double>(2) > curr_T.at<double>(1) )) )
+                {
+                    prev_T += scale*(prev_R*curr_T);
+                    prev_R = prev_R * curr_R;
+                }
 
-            if((scale>0.1) && (curr_T.at<double>(2)>curr_T.at<double>(0) && (curr_T.at<double>(2) > curr_T.at<double>(1) )) )
-            {
-                prev_T += scale*(prev_R*curr_T);
-                prev_R = prev_R * curr_R;
-            }
+                if(prev_points.size()<min_points)
+                {
+                    FeatureDetection(prev_image, prev_points);
+                    FeatureMatching(prev_image, curr_image, prev_points, curr_points, status);
+                }
 
-            if(prev_points.size()<min_points)
-            {
-                FeatureDetection(prev_image, prev_points);
-                FeatureMatching(prev_image, curr_image, prev_points, curr_points, status);
-            }
+                for(int i = 0; i<curr_points.size(); i++)
+                {
+                    idx.push_back(id++);
+                }
 
-            for(int i = 0; i<curr_points.size(); i++)
-            {
-                idx.push_back(id++);
-            }
+                for(int i = 0; i<curr_points.size(); i++)
+                {
+                    prev_points_map.insert(std::make_pair(idx[i], curr_points[i]));
+                }
 
-            for(int i = 0; i<curr_points.size(); i++)
-            {
-                prev_points_map.insert(std::make_pair(idx[i], curr_points[i]));
-            }
+                image_taj = curr_image.clone();
 
-            image_taj = curr_image.clone();
+                visualize(n_frame);
+                n_frame++;
+                prev_image = Img1;
+                prev_points = curr_points;
 
-            visualize(n_frame);
-
-            prev_image = curr_image.clone();
-            prev_points = curr_points;
+                while(!image_cache.empty())
+                    image_cache.pop();
+             }
          }
     }
-
     void monoodom::visualize(int n_frame)
     {
         std::cout<<"visualize"<<std::endl;
@@ -239,11 +276,21 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 cv::arrowedLine(traj, curr_points[i], mit->second, cv::Scalar(255, 255, 255), 1, 16, 0, 0.1);
             }
         }
-        // cv_ptr = image_taj;
-        cv::addWeighted(image_taj, 1.0, image_taj, 0.6, 0, image_taj);
-        // imagePub_.publish(cv_ptr->toImageMsg());
-        cv::imshow("Result Image", image_taj);
-        cv::namedWindow("Result, Image", cv::WINDOW_AUTOSIZE);
+        std::cout<<"Ending Iteration here: "<<n_frame<<std::endl;
+        // cv_bridge::CvImage img_bridge;
+        // sensor_msgs::Image img_msg;
+        // std_msgs::Header header;
+
+
+        // cv::addWeighted(image_taj, 1.0, traj, 0.6, 0, image_taj);
+
+        // img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, image_taj);
+        // img_bridge.toImageMsg(img_msg);
+        // imagePub_.publish(img_msg);
+
+        // // std::cout<<image_traj.size()<<std::endl;
+        // // cv::imshow("Result Image", image_taj);
+        // // cv::namedWindow("Result, Image", cv::WINDOW_AUTOSIZE);
+        // // cv::waitKey(1);
         
-        cv::waitKey(1);
     }

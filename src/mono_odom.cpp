@@ -21,7 +21,9 @@ it_(nh_)
 bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sensor_msgs::ImageConstPtr& Image2 = nullptr)
 {
     cv_bridge::CvImageConstPtr cvbImg1, cvbImg2;
-
+    cv_bridge::CvImageConstPtr ImgPtr1;
+    ImgPtr1 = cv_bridge::toCvCopy(Image1);
+    curr_image = ImgPtr1->image;
     if(!Image2)
     {
         try
@@ -222,7 +224,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 if(prev_points.size()<min_points)
                 {
                     FeatureDetection(prev_image, prev_points);
-                    FeatureMatching(prev_image, curr_image, prev_points, curr_points, status);
+                    FeatureMatching(prev_image, Img1, prev_points, curr_points, status);
                 }
 
                 for(int i = 0; i<curr_points.size(); i++)
@@ -235,8 +237,9 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                     prev_points_map.insert(std::make_pair(idx[i], curr_points[i]));
                 }
 
-                image_taj = curr_image.clone();
-
+                image_traj = Img1.clone();
+                std::cout<<"In Image_Call Back: "<<image_traj.rows<<" "<<image_traj.cols<<std::endl;
+                std::cout<<"In Image_Call Back: "<<curr_image.rows<<" "<<curr_image.cols<<std::endl;
                 visualize(n_frame);
                 n_frame++;
                 prev_image = Img1;
@@ -250,9 +253,9 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
     void monoodom::visualize(int n_frame)
     {
         std::cout<<"visualize"<<std::endl;
-        cv::Mat traj = cv::Mat::zeros(cv::Size(600,600), CV_8UC3);
-        int visual_limit = 5000;
+        cv::Mat traj = cv::Mat::zeros(cv::Size(640,480), CV_8UC3);
 
+        int visual_limit = 5000;
         if(visual_limit>min_points)
         {
             visual_limit = min_points;
@@ -266,7 +269,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
         std::map<int, cv::Point2f>::iterator mit;
 
-        for(int i = 0; i<visual_limit; i++)
+        for(size_t i = 0; i<visual_limit; i++)
         {
             int id = idx[i];
             mit = prev_points_map.find(id);
@@ -281,16 +284,19 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
         // sensor_msgs::Image img_msg;
         // std_msgs::Header header;
 
-
-        // cv::addWeighted(image_taj, 1.0, traj, 0.6, 0, image_taj);
-
+        // std::cout<<"In Image_Call Back: "<<image_traj.rows<<" "<<image_traj.cols<<std::endl;
+        // std::cout<<"In Image_Call Back: "<<traj.rows<<" "<<traj.cols<<std::endl;
+        std::cout<<"In Image_Call Back: "<<curr_image.channels()<<" "<<std::endl;
+        std::cout<<"In Image_Call Back: "<<traj.channels()<<" "<<std::endl;
+        cv::addWeighted(curr_image, 1.0, traj, 0.6, 0, curr_image);
+        
         // img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, image_taj);
         // img_bridge.toImageMsg(img_msg);
         // imagePub_.publish(img_msg);
 
-        // // std::cout<<image_traj.size()<<std::endl;
-        // // cv::imshow("Result Image", image_taj);
-        // // cv::namedWindow("Result, Image", cv::WINDOW_AUTOSIZE);
-        // // cv::waitKey(1);
+        // std::cout<<image_traj.size()<<std::endl;
+        cv::imshow("Result Image", curr_image);
+        cv::namedWindow("Result, Image", cv::WINDOW_AUTOSIZE);
+        cv::waitKey(1);
         
     }

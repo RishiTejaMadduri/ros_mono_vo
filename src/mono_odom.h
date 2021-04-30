@@ -39,6 +39,7 @@ class monoodom
         bool calibInit;
         
         std::queue<sensor_msgs::ImageConstPtr>image_cache;
+        
         int max_features;
         int min_points;
         int max_frames;
@@ -47,7 +48,7 @@ class monoodom
 
         double scale, focal;
         cv::Point2f pp;
-        cv::Mat image_taj;
+        cv::Mat image_traj;
         cv::Mat K, P, R;
         cv::Mat prev_image;
         cv::Mat curr_image;

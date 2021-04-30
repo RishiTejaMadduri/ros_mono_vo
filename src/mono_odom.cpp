@@ -16,6 +16,9 @@ it_(nh_)
     max_frames = INT_MAX;
     min_points = 50;
     n_frame = 0;
+    odom_output = cv::Mat::zeros(600, 600, CV_8UC3);
+    cv::namedWindow("Feature Tracking", cv::WINDOW_AUTOSIZE);
+    cv::namedWindow("Trajectory", cv::WINDOW_AUTOSIZE);
 }
 
 bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sensor_msgs::ImageConstPtr& Image2 = nullptr)
@@ -254,6 +257,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
     {
         std::cout<<"visualize"<<std::endl;
         cv::Mat traj = cv::Mat::zeros(cv::Size(640,480), CV_8UC3);
+        
 
         int visual_limit = 5000;
         if(visual_limit>min_points)
@@ -279,24 +283,24 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 cv::arrowedLine(traj, curr_points[i], mit->second, cv::Scalar(255, 255, 255), 1, 16, 0, 0.1);
             }
         }
+        
         std::cout<<"Ending Iteration here: "<<n_frame<<std::endl;
         // cv_bridge::CvImage img_bridge;
         // sensor_msgs::Image img_msg;
         // std_msgs::Header header;
+        int x = int(prev_T.at<double>(0)) + 300;
+        int y = int(prev_T.at<double>(1)) + 100;
+        cv::circle(odom_output, cv::Point(x,y), 1, cv::Scalar(255, 0, 0), 2);
+        cv::rectangle(odom_output, cv::Point(10,30), cv::Point(550, 50), cv::Scalar(0,0,0), CV_FILLED);
 
         // std::cout<<"In Image_Call Back: "<<image_traj.rows<<" "<<image_traj.cols<<std::endl;
         // std::cout<<"In Image_Call Back: "<<traj.rows<<" "<<traj.cols<<std::endl;
         std::cout<<"In Image_Call Back: "<<curr_image.channels()<<" "<<std::endl;
         std::cout<<"In Image_Call Back: "<<traj.channels()<<" "<<std::endl;
         cv::addWeighted(curr_image, 1.0, traj, 0.6, 0, curr_image);
-        
-        // img_bridge = cv_bridge::CvImage(header, sensor_msgs::image_encodings::RGB8, image_taj);
-        // img_bridge.toImageMsg(img_msg);
-        // imagePub_.publish(img_msg);
 
-        // std::cout<<image_traj.size()<<std::endl;
-        cv::imshow("Result Image", curr_image);
-        cv::namedWindow("Result, Image", cv::WINDOW_AUTOSIZE);
-        cv::waitKey(1);
+        cv::imshow("Feature Tracking", curr_image);
+        cv::imshow("Trajectory", odom_output);
         
+        cv::waitKey(1);
     }

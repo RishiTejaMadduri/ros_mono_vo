@@ -25,6 +25,14 @@ class monoodom
         void FeatureDetection(cv::Mat& Img1, std::vector<cv::Point2f>& keyPoints);
         void imageCallBack(const sensor_msgs::ImageConstPtr& Img1);
         void visualize(int n_frame);
+        int getFrames()
+        {
+            return n_frame;
+        }
+        cv::Mat getTranslation()
+        {
+            return prev_T;
+        }
     
 
     private:
@@ -55,9 +63,10 @@ class monoodom
         cv::Mat prev_R, prev_T, curr_R, curr_T;
         cv::Mat E;
         cv::Mat mask;
+        cv::Mat odom_output;
         cv::Mat Img1, Img2;
         cv_bridge::CvImagePtr cv_ptr;
-
+        
         std::map<int, cv::Point2f>prev_points_map;
         std::vector<cv::Point2f>prev_points;
         std::vector<cv::Point2f>curr_points;

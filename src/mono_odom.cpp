@@ -1,24 +1,78 @@
 #include "mono_odom.h"
 
-bool score_comparator(const cv::KeyPoint& p1, const cv::KeyPoint& p2)
-{
-    return p1.response > p2.response;
-}
 
 monoodom::monoodom():
 it_(nh_)
 {
-    camInfo_ = nh_.subscribe("/camera/rgb/camera_info", 1, &monoodom::getCalib, this);
-    
-    // if(calibInit)
-    imageSub_ = it_.subscribe("/camera/rgb/image_raw", 2, &monoodom::imageCallBack, this, image_transport::TransportHints("compressed"));
-    imagePub_ = it_.advertise("/mono_vo/output", 1);
+    // camInfo_ = nh_.subscribe("/camera/rgb/camera_info", 1, &monoodom::getCalib, this);
+    // imageSub_ = it_.subscribe("/camera/rgb/image_raw", 1, &monoodom::imageCallBack, this, image_transport::TransportHints("compressed"));
+    // imagePub_ = it_.advertise("/mono_vo/output", 1);
+    pub_odom = nh_.advertise<nav_msgs::Odometry>("odom", 1);
+
+    transform.frame_id_ = "/world";
+    transform.child_frame_id_ = "/camera";
     max_frames = INT_MAX;
-    min_points = 50;
+    min_points = 2000;
     n_frame = 0;
     odom_output = cv::Mat::zeros(600, 600, CV_8UC3);
+
     cv::namedWindow("Feature Tracking", cv::WINDOW_AUTOSIZE);
     cv::namedWindow("Trajectory", cv::WINDOW_AUTOSIZE);
+
+    fn_calib_ = "/media/rishi/bridge/data_odometry_color/sequences/00/calib.txt";
+    fn_poses_ = "/media/rishi/bridge/data_odometry_color/poses/00.txt";
+    fn_images_ =  "/media/rishi/bridge/data_odometry_color/sequences/00/image_2/";
+
+    count = 0;
+    flow = 0;
+    prev_count = 0;
+
+    getCalib();
+    imageCallBack();
+}
+
+std::string monoodom::AddZeroPadding(const int value, const unsigned precision) 
+{
+  std::ostringstream oss;
+  oss << std::setw(precision) << std::setfill('0') << value;
+  return oss.str();
+}
+
+double monoodom::compute_scale(int nframe)
+{
+  std::string line;
+  int i=0;
+  std::ifstream fin(fn_poses_);
+  double scale_;
+  double x=0,y=0,z=0;
+  double prev_x, prev_y, prev_z;
+
+  if(fin.is_open()) {
+    while((std::getline(fin, line)) && (i<=nframe)) {
+      prev_z = z;
+      prev_y = y;
+      prev_x = x;
+
+      std::istringstream iss(line);
+      for(int j=0; j<12; j++) {
+        iss>>z;
+        if(j==7) y=z;
+        if(j==3) x=z;
+      }
+      i++;
+    }
+    fin.close();
+  }
+  else {
+    std::cout << "[-] Unable to open file: " << fn_poses_ << std::endl;
+    scale_ = 0;
+    return scale_;
+  }
+
+  scale_ = std::sqrt( (x-prev_x)*(x-prev_x) +
+                      (y-prev_y)*(y-prev_y) +
+                      (z-prev_z)*(z-prev_z));
+    return scale_;
 }
 
 bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sensor_msgs::ImageConstPtr& Image2 = nullptr)
@@ -31,7 +85,7 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
     {
         try
         {
-            cvbImg1 = cv_bridge::toCvShare(Image1);
+            cvbImg1 = cv_bridge::toCvCopy(Image1);
         }
         catch(const std::exception& e)
         {
@@ -45,8 +99,8 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
     {
         try
         {
-            cvbImg1 = cv_bridge::toCvShare(Image1);
-            cvbImg2 = cv_bridge::toCvShare(Image2);
+            cvbImg1 = cv_bridge::toCvCopy(Image1);
+            cvbImg2 = cv_bridge::toCvCopy(Image2);
         }
         catch(const std::exception& e)
         {
@@ -61,71 +115,98 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
     return false;
 }
-    void monoodom::getCalib(const sensor_msgs::CameraInfoConstPtr& info)
+    void monoodom::getCalib()
+    // void monoodom::getCalib(const sensor_msgs::CameraInfoConstPtr& info)
     {
+        // if(!calibInit)
+        // {
+        //     // R = cv::Mat(3, 3, CV_64FC1, (void *)info->R.elems).clone();
+        //     K = cv::Mat(3, 3, CV_64FC1, (void *)info->K.elems).clone();
+        //     D = cv::Mat::zeros(1, 5, CV_64FC1);
+        //     focal = info->K[0];
+        //     pp.x = info->K[2];
+        //     pp.y = info->K[5]; 
+
+        //     //std::cout<<"CALIBRATION DONE"<<std::endl;
+        //     calibInit = true;
+        // }
+
         if(!calibInit)
         {
-            focal = info->P[0];
-            pp.x = info->P[2];
-            pp.y = info->P[5]; 
+             std::ifstream fin(fn_calib_);
+            std::string line;
 
-            R = cv::Mat(3, 3, CV_64FC1, (void *)info->R.elems).clone();
-            P = cv::Mat(3, 3, CV_64FC1, (void *)info->P.elems).clone();
-            K = cv::Mat(3, 3, CV_64FC1);
-            
-            for(int i = 0; i<3; i++)
+            if(fin.is_open()) 
             {
-                for(int j = 0; j<3; j++)
+                std::getline(fin, line);
+                std::istringstream iss(line);
+
+                for(int j=0; j<13; j++) 
                 {
-                    K.at<double>(i, j) = P.at<double>(i, j);
+                    std::string token;
+                    iss >> token;
+                    if(j==1) {
+                        focal = std::stod(token);   // focal length
+                    }
+                    if(j==3) {
+                        pp.x = std::stod(token); // principal point x
+                    }
+                    if(j==7) {
+                        pp.y = std::stod(token); // printcipal point y
+                    }
                 }
+                fin.close();
             }
-            std::cout<<"CALIBRATION DONE"<<std::endl;
+            else {
+                std::cout << "[-] Cannot read the calibration file: " << fn_calib_ << std::endl;
+                focal = 0;
+                pp = cv::Point2f(0,0);
+            }
             calibInit = true;
         }
 
     }
 
-    void monoodom::kptsBucketing(std::vector<cv::Point2f>& srcKpts, std::vector<cv::KeyPoint>& dstKpts)
+    void monoodom::kptsBucketing(std::vector<cv::Point2f>& keyPoints, std::vector<cv::KeyPoint>& kptsBuckted)
     {
-        for(int i = 0; i<50; i++)
+        for(int i = 0; i<2000; i++)
         {
-            srcKpts.push_back(dstKpts[i].pt);
+            keyPoints.push_back(kptsBuckted[i].pt);
         }
-        std::cout<<"kptsBucketing: srcKpts"<<srcKpts.size()<<std::endl;
+        //std::cout<<"kptsBucketing: srcKpts"<<srcKpts.size()<<std::endl;
     }
 
-    void monoodom::FeatureDetection(cv::Mat& Img1, std::vector<cv::Point2f>& keyPoints)
+    bool score_comparator(const cv::KeyPoint& p1, const cv::KeyPoint& p2)
+    {
+        return p1.response > p2.response;
+    }
+    void monoodom::FeatureDetection(cv::Mat Img1, std::vector<cv::Point2f>& keyPoints)
     {
 
-        std::cout<<"featureDetection"<<std::endl;
+        //std::cout<<"featureDetection"<<std::endl;
 
         std::vector<cv::KeyPoint> kptsBuckted;
         int fast_threshold = 20;
         bool nms = true;
         FAST(Img1, kptsBuckted, fast_threshold, nms);
 
-        std::sort(kptsBuckted.begin(), kptsBuckted.end(), score_comparator);
-        std::cout<<"Feature Detection: kptsBucketed"<<kptsBuckted.size()<<std::endl;
-        kptsBucketing(keyPoints, kptsBuckted);
+        std::sort(kptsBuckted.begin(), kptsBuckted.end(), [](const cv::KeyPoint &a, const cv::KeyPoint &b) {
+                                                            return a.response > b.response;
+                                                            });
+        for(int i = 0; i<2000; i++)
+        {
+            keyPoints.push_back(kptsBuckted[i].pt);
+        }
 
     }
 
-    void monoodom::FeatureMatching(cv::Mat& Img1, cv::Mat& Img2, std::vector<cv::Point2f>& keyPoints1, std::vector<cv::Point2f>& keyPoints2, std::vector<uchar>& status)
+    void monoodom::FeatureMatching(cv::Mat Img1, cv::Mat Img2, std::vector<cv::Point2f>& keyPoints1, std::vector<cv::Point2f>& keyPoints2)
     {
-        std::cout<<"Feature Matching"<<std::endl;
         std::vector<float>err;
         cv::Size winSize = cv::Size(21, 21);
-
-        std::cout<<"KeyPoints 1: "<<keyPoints1.size();
-        std::cout<<"KeyPoints 2: "<<keyPoints2.size()<<std::endl;
-        std::cout<<"Image 1 Channels: "<<Img1.channels()<<"Rows: "<<Img1.rows<<" "<<"Cols: "<<Img1.cols<<std::endl;
-        std::cout<<"Image 2 Channels: "<<Img2.channels()<<"Rows: "<<Img2.rows<<" "<<"Cols: "<<Img2.cols<<std::endl;
         cv::TermCriteria termcrit=cv::TermCriteria(cv::TermCriteria::COUNT+cv::TermCriteria::EPS, 30, 0.01);
-        std::cout<<"OPT12"<<std::endl;
  
         cv::calcOpticalFlowPyrLK(Img1, Img2, keyPoints1, keyPoints2, status, err, winSize, 3, termcrit, 0, 0.001);
-        std::cout<<"calcOpticalFlow"<<std::endl;
         int indexCorrection = 0;
 
         for(int i = 0; i<status.size(); i++)
@@ -142,92 +223,247 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 indexCorrection++;
             }
         }
-        std::cout<<"End of For loop"<<std::endl;
+        //std::cout<<"End of For loop"<<std::endl;
     }
 
-
-    void monoodom::imageCallBack(const sensor_msgs::ImageConstPtr& Image1)
+    bool monoodom::IsRotMat(cv::Mat &R) 
     {
-        std::cout<<"imageCallBack"<<std::endl;
-        scale = 0.5;
+    cv::Mat Rt;
+    transpose(R, Rt);
+    cv::Mat shouldBeIdentity = Rt * R;
+    cv::Mat I = cv::Mat::eye(3,3, shouldBeIdentity.type());
 
-        double flow = 0.0;
+    return norm(I, shouldBeIdentity) < 1e-6;
+    }
 
+    void monoodom::ReduceVector(std::vector<int> &v) 
+    {
+        int j=0;
+
+        for(int i=0; i<int(v.size()); i++) {
+            if(status[i]) {
+            v[j++] = v[i];
+            }
+        }
+        v.resize(j);
+    }
+
+    cv::Vec3f monoodom::RotMatToEuler(cv::Mat &R, bool flag) 
+    {
+        assert(IsRotMat(R));
+        float sy = sqrt(R.at<double>(0,0) * R.at<double>(0,0) +  R.at<double>(1,0) * R.at<double>(1,0) );
+        bool singular = sy < 1e-6;
+        float x, y, z;
+
+        if (!singular) {
+            x = atan2(R.at<double>(2,1) , R.at<double>(2,2));
+            y = atan2(-R.at<double>(2,0), sy);
+            z = atan2(R.at<double>(1,0), R.at<double>(0,0));
+        }
+        else {
+            x = atan2(-R.at<double>(1,2), R.at<double>(1,1));
+            y = atan2(-R.at<double>(2,0), sy);
+            z = 0;
+        }
+
+        if(flag)
+        {
+            std::string DIR = "/home/rishi/catkin_ws/src/ros_mono_vo/src/data_r.txt";
+            std::ofstream outdata;
+
+            outdata.open(DIR, std::ios::app);
+            outdata<<x<<" "<<y<<" "<<z<<std::endl;
+            outdata.close();
+        }
+
+        return cv::Vec3f(x, y, z);
+    }
+    // void print_t(cv::Mat &R)
+    // {
+    //     std::string DIR = "/home/rishi/catkin_ws/src/ros_mono_vo/src/data_r.txt";
+    //     std::ofstream outdata;
+
+    //     outdata.open(DIR, std::ios::app);
+    //     outdata<<T.at<double>(0)<<" "<<T.at<double>(1)<<" "<<T.at<double>(2)<<std::endl;
+    //     outdata.close();
+    // }
+    
+    // void monoodom::imageCallBack(const sensor_msgs::ImageConstPtr& Image1)
+    // {
+    //     if(!calibInit)
+    //     {
+    //         ROS_ERROR("NO CALIB INFO FOUND");
+    //         return;
+    //     }
+
+    //      image_cache.push(Image1);
+
+    //      if(!odomInit && n_frame<2)
+    //      {
+    //          if(image_cache.size()>10)
+    //          {
+    //                 const sensor_msgs::ImageConstPtr Image1 = image_cache.front();
+    //                 image_cache.pop();
+
+    //                 int size = image_cache.size();
+
+    //                 while(size != 1)
+    //                 {
+    //                     image_cache.pop();
+    //                     size--;
+    //                 }
+
+    //                 const sensor_msgs::ImageConstPtr Image2 = image_cache.front();
+    //                 image_cache.pop();
+
+    //                 if(!convertImages(Image1, Image2))
+    //                 {
+    //                     ROS_WARN("FAILED IMAGE CONVERSION");
+    //                     return;
+    //                 }
+
+
+    //                 FeatureDetection(Img1, points1);
+    //                 FeatureMatching(Img1, Img2, points1, points2);
+    //                 E = cv::findEssentialMat(points2, points1, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
+    //                 cv::recoverPose(E, points2, points1, R, curr_T, focal, pp, mask);
+
+    //                 prev_image = Img2.clone();
+    //                 prev_points = points2;
+    //                 prev_R = R.clone();
+    //                 prev_T = curr_T.clone();
+
+
+    //                 ROS_INFO(" INITIALIZED \n");
+
+    //                 odomInit = true;
+    //                 n_frame = 2;
+    //          }
+    //      }
+         
+    //      else
+    //      {
+
+    //          if(image_cache.size()>=1)
+    //          {
+    //             if(n_frame>max_frames)
+    //                 return;
+                
+    //             // while(image_cache.size()>1)
+    //             // {
+    //             //     image_cache.pop();
+    //             // }
+
+    //             const sensor_msgs::ImageConstPtr Image1 = image_cache.front();
+    //             image_cache.pop();
+    //             convertImages(Image1);
+        
+    //             FeatureMatching(prev_image, Img1, prev_points, curr_points);
+
+
+    //             E = cv::findEssentialMat(curr_points, prev_points, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
+    //             cv::recoverPose(E, curr_points, prev_points, R, curr_T, focal, pp, mask);
+
+    //             scale = 2.0;
+    //             if((scale>0.1)&&(curr_T.at<double>(2) > curr_T.at<double>(0)) && (curr_T.at<double>(2) > curr_T.at<double>(1)))
+    //             {
+    //                 count++;
+    //                 prev_T = prev_T + scale*(prev_R*curr_T);
+    //                 prev_R = R * prev_R;
+    //                 // std::cout<<"Prev_R at: "<<count<<prev_R<<std::endl;
+    //                 // std::cout<<prev_T<<std::endl;
+     
+    //             }
+
+    //             if(prev_points.size()<min_points)
+    //             {
+    //                 FeatureDetection(prev_image, prev_points);
+    //                 FeatureMatching(prev_image, Img1, prev_points, curr_points);
+    //             }
+
+    //             for(int i = 0; i<curr_points.size(); i++)
+    //             {
+    //                 idx.push_back(id++);
+    //             }
+
+    //             for(int i = 0; i<curr_points.size(); i++)
+    //             {
+    //                 prev_points_map.insert(std::make_pair(idx[i], curr_points[i]));
+    //             }
+
+    //             image_traj = Img1.clone();
+    //             n_frame++;
+    //             prev_image = Img1;
+    //             prev_points = curr_points;
+    //             visualize(n_frame);
+    //             while(!image_cache.empty())
+    //                 image_cache.pop();
+
+    //             flow++;
+    //          }
+    //      }
+    // }
+    void monoodom::imageCallBack()
+    {
         if(!calibInit)
         {
-            ROS_WARN("NO CALIB INFO FOUND");
+            ROS_ERROR("NO CALIB INFO FOUND");
             return;
         }
 
-        // std::cout<<image_cache.size()<<std::endl;
-         image_cache.push(Image1);
-         
-         if(!odomInit && n_frame<2)
+         while(n_frame<max_frames)
          {
-             if(image_cache.size()>2)
-             {
-                    
-                    const sensor_msgs::ImageConstPtr Image1 = image_cache.front();
-                    image_cache.pop();
-                    const sensor_msgs::ImageConstPtr Image2 = image_cache.front();
-                    image_cache.pop();
+             if(!odomInit && n_frame<2)
+            {
+                scale = 1.0;
+                std::string fn1 = fn_images_ + AddZeroPadding(0, 6) + ".png";
+                std::string fn2 = fn_images_ + AddZeroPadding(1, 6) + ".png";
 
-                    if(!convertImages(Image1, Image2))
-                    {
-                        ROS_WARN("FAILED IMAGE CONVERSION");
-                        return;
-                    }
+                cv::Mat Img1 = cv::imread(fn1, cv::IMREAD_GRAYSCALE);
+                cv::Mat Img2 = cv::imread(fn2, cv::IMREAD_GRAYSCALE);
 
-                    std::vector<cv::Point2f> points1, points2;
-                    FeatureDetection(Img1, points1);
+                FeatureDetection(Img1, points1);
+                FeatureMatching(Img1, Img2, points1, points2);
+                E = cv::findEssentialMat(points2, points1, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
+                cv::recoverPose(E, points2, points1, R, curr_T, focal, pp, mask);
 
-                    FeatureMatching(Img1, Img2, points1, points2, status);
+                prev_image = Img2;
+                prev_points = points2;
+                prev_R = R.clone();
+                prev_T = curr_T.clone();
 
-                    E = cv::findEssentialMat(points2, points1, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
-                    cv::recoverPose(E, points2, points1, curr_R, curr_T, focal, pp, mask);
 
-                    std::cout<<"In Image Call back dims: "<<Img2.rows<<" "<<Img2.cols<<std::endl;
-                    prev_image = Img2;
-                    std::cout<<"In Image Call back prev_image dims: "<<prev_image.rows<<" "<<prev_image.cols<<std::endl;
-                    prev_points = points2;
+                ROS_INFO(" INITIALIZED \n");
 
-                    prev_R = curr_R.clone();
-                    prev_T = curr_T.clone();
+                odomInit = true;
+                n_frame = 2;
+            }
+            
+            if(odomInit && n_frame>=2)
+            {
 
-                    ROS_INFO(" INITIALIZED \n");
-                    odomInit = true;
-                    n_frame = 2;
-             }
-         }
-         
-         else
-         {
-             
-             if(image_cache.size() == 2)
-             {
-                std::cout<<n_frame<<" "<<max_frames<<std::endl;
                 if(n_frame>max_frames)
                     return;
-
-                const sensor_msgs::ImageConstPtr Image1 = image_cache.front();
-                image_cache.pop();
-                convertImages(Image1);
-        
-                FeatureMatching(prev_image, Img1, prev_points, curr_points, status);
+                
+                std::string fn = fn_images_ + AddZeroPadding(n_frame, 6) + ".png";
+                curr_image = cv::imread(fn);
+                cv::cvtColor(curr_image, curr_image_, cv::COLOR_BGR2GRAY);
+                FeatureMatching(prev_image, curr_image_, prev_points, curr_points);
                 E = cv::findEssentialMat(curr_points, prev_points, focal, pp, cv::RANSAC, 0.999, 1.0, mask);
-                std::cout<<"Fidning E here"<<std::endl;
-                cv::recoverPose(E, curr_points, prev_points, curr_R, curr_T, focal, pp, mask);
+                cv::recoverPose(E, curr_points, prev_points, R, curr_T, focal, pp, mask);
 
-                if((scale>0.1) && (curr_T.at<double>(2)>curr_T.at<double>(0) && (curr_T.at<double>(2) > curr_T.at<double>(1) )) )
+                scale = compute_scale(n_frame);
+                if((scale>0.1)&&(curr_T.at<double>(2) > curr_T.at<double>(0)) && (curr_T.at<double>(2) > curr_T.at<double>(1)))
                 {
-                    prev_T += scale*(prev_R*curr_T);
-                    prev_R = prev_R * curr_R;
+
+                    prev_T = prev_T + scale*(prev_R*curr_T);
+                    prev_R = R * prev_R;        
                 }
 
                 if(prev_points.size()<min_points)
                 {
                     FeatureDetection(prev_image, prev_points);
-                    FeatureMatching(prev_image, Img1, prev_points, curr_points, status);
+                    FeatureMatching(prev_image, curr_image_, prev_points, curr_points);
                 }
 
                 for(int i = 0; i<curr_points.size(); i++)
@@ -240,23 +476,20 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                     prev_points_map.insert(std::make_pair(idx[i], curr_points[i]));
                 }
 
-                image_traj = Img1.clone();
-                std::cout<<"In Image_Call Back: "<<image_traj.rows<<" "<<image_traj.cols<<std::endl;
-                std::cout<<"In Image_Call Back: "<<curr_image.rows<<" "<<curr_image.cols<<std::endl;
+                image_traj = curr_image.clone();
                 visualize(n_frame);
-                n_frame++;
-                prev_image = Img1;
+                prev_image = curr_image_.clone();
                 prev_points = curr_points;
-
-                while(!image_cache.empty())
-                    image_cache.pop();
-             }
+                n_frame++;
+                std::cout<<fn<<std::endl;
+            }
+            // sleep(1);
          }
     }
+
     void monoodom::visualize(int n_frame)
     {
-        std::cout<<"visualize"<<std::endl;
-        cv::Mat traj = cv::Mat::zeros(cv::Size(640,480), CV_8UC3);
+        cv::Mat traj = cv::Mat::zeros(cv::Size(1241,376), CV_8UC3);
         
 
         int visual_limit = 5000;
@@ -283,24 +516,60 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 cv::arrowedLine(traj, curr_points[i], mit->second, cv::Scalar(255, 255, 255), 1, 16, 0, 0.1);
             }
         }
-        
-        std::cout<<"Ending Iteration here: "<<n_frame<<std::endl;
-        // cv_bridge::CvImage img_bridge;
-        // sensor_msgs::Image img_msg;
-        // std_msgs::Header header;
-        int x = int(prev_T.at<double>(0)) + 300;
-        int y = int(prev_T.at<double>(1)) + 100;
-        cv::circle(odom_output, cv::Point(x,y), 1, cv::Scalar(255, 0, 0), 2);
-        cv::rectangle(odom_output, cv::Point(10,30), cv::Point(550, 50), cv::Scalar(0,0,0), CV_FILLED);
+   
+        // int x = int(prev_T.at<double>(0)) + 300;
+        // int y = int(prev_T.at<double>(1)) + 150;
+        // int z = int(prev_T.at<double>(2)) + 300;
+        // // std::cout<<x<<" "<<y<<" "<<z<<std::endl;
+        // cv::circle(odom_output, cv::Point(x,y), 0.25, cv::Scalar(255, 0, 0), 2);
+        // cv::rectangle(odom_output, cv::Point(10,30), cv::Point(550, 50), cv::Scalar(0,0,0), CV_FILLED);
+        // cv::imshow("Trajectory", odom_output);
 
-        // std::cout<<"In Image_Call Back: "<<image_traj.rows<<" "<<image_traj.cols<<std::endl;
-        // std::cout<<"In Image_Call Back: "<<traj.rows<<" "<<traj.cols<<std::endl;
-        std::cout<<"In Image_Call Back: "<<curr_image.channels()<<" "<<std::endl;
-        std::cout<<"In Image_Call Back: "<<traj.channels()<<" "<<std::endl;
-        cv::addWeighted(curr_image, 1.0, traj, 0.6, 0, curr_image);
+        std::cout<<"Before Plotting function"<<std::endl;
+        std::cout<<"image_traj "<<image_traj.rows<<" "<<image_traj.cols<<std::endl;
+        cv::addWeighted(image_traj, 1.0, traj, 0.6, 0, image_traj);
+        std::cout<<"Adding weights"<<std::endl;
+        cv::imshow("Feature Tracking", image_traj);
 
-        cv::imshow("Feature Tracking", curr_image);
-        cv::imshow("Trajectory", odom_output);
+        Rot = prev_R;
+        trans = prev_T;
+        euler = RotMatToEuler(Rot, true);
+        cv::Vec3f p_R = RotMatToEuler(R, false);
+        tf::Matrix3x3 _R(Rot.at<double>(0,0), Rot.at<double>(0,1), Rot.at<double>(0,2),
+          Rot.at<double>(1,0), Rot.at<double>(1,1), Rot.at<double>(1,2),
+          Rot.at<double>(2,0), Rot.at<double>(2,1), Rot.at<double>(2,2));
+        _R.getRotation(quat);
+        cv::Ptr<cv::Formatter> round = cv::Formatter::get(cv::Formatter::FMT_DEFAULT);
+        round->set64fPrecision(3);
+        round->set32fPrecision(3);
+        std::cout<<"FRAME ID: "<<n_frame<<std::endl;
+        std::cout<<"Rotation: "<<std::setprecision(3) << "[" << p_R.val[0] << ", " << p_R.val[1] << ", " << p_R.val[2]<< "]" << std::endl;
+        std::cout << "Acc. Rotation(euler):  " <<std::setprecision(3) << "[" << euler.val[0]<< ", " << euler.val[1]<< ", " << euler.val[2]<< "]" << std::endl;
+        std::cout << "Translate(x,y,z): " <<round->format(trans.t()) << std::endl;
+
+        transform.stamp_ = ros::Time::now();
+        transform.setRotation(tf::Quaternion(quat[0], quat[1], quat[2], quat[3]));
+        transform.setOrigin(tf::Vector3(trans.at<double>(0), trans.at<double>(1), trans.at<double>(2)));
+
+        tf_broadcaster.sendTransform(transform);
+
+        odom.header.stamp = ros::Time::now();
+        odom.header.frame_id = "/world";
+        odom.child_frame_id = "/camera";
         
+        odom_quat.x = quat[0];
+        odom_quat.y = quat[1];
+        odom_quat.z = quat[2];
+        odom_quat.w = quat[3];
+
+        // Set the position and rotation.
+        odom.pose.pose.position.x = trans.at<double>(0);
+        odom.pose.pose.position.y = trans.at<double>(1);
+        odom.pose.pose.position.z = trans.at<double>(2);
+        odom.pose.pose.orientation = odom_quat;
+
+        // publish to /odom.
+        pub_odom.publish(odom);
+
         cv::waitKey(1);
     }

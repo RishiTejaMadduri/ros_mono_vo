@@ -19,9 +19,8 @@ cd ..
 catkin_make
 ```
 ```
-roslaunch ros_mono_vo ros_mono_vo.launch 
+roslaunch roslaunch ros_mono_vo_kitti ros_mono_vo.launch 
 ```
-
 
 ## References:
 While I built the pipeline from scract, the idea for publishing the odom poses was borrowed from https://github.com/edward0im/simple_mono_vo_ros

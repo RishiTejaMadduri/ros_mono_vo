@@ -21,37 +21,38 @@ class monoodom
 {
     public:
         monoodom();
+         //Image processing funciton - Not being used
         bool convertImages(const sensor_msgs::ImageConstPtr& Img, const sensor_msgs::ImageConstPtr& Img2);
-        // void getCalib(const sensor_msgs::CameraInfoConstPtr& info);
+
+        //Calibration callback
         void getCalib();
-        void kptsBucketing(std::vector<cv::Point2f>& srcKpts, std::vector<cv::KeyPoint>& dstKpts);
+
+        //Feature Matching function for fast features
         void FeatureMatching(cv::Mat Img1, cv::Mat Img2, std::vector<cv::Point2f>& keyPoints1, std::vector<cv::Point2f>& keyPoints2);
+
+        //Detection of Subsequent featuress
         void FeatureDetection(cv::Mat Img1, std::vector<cv::Point2f>& keyPoints);
-        // void imageCallBack(const sensor_msgs::ImageConstPtr& Img1);
+
+        //The main ImageCallBack function that runs the VO Pipeline
         void imageCallBack();
+
+        //Visualizer 
         void visualize(int n_frame);
-        // void posecallback(const nav_msgs::Odometry::ConstPtr &msg);
+
+        //Compute Scale
         double compute_scale(int nframe);
-        // bool score_comparator(const cv::KeyPoint& p1, const cv::KeyPoint& p2);
+
+         //Convert Rotation matrix to Euler Angles
         cv::Vec3f RotMatToEuler(cv::Mat &R, bool flag); 
         bool IsRotMat(cv::Mat &R); 
+
+        //Zero padding for names
         std::string AddZeroPadding(const int value, const unsigned presision);
 
-        cv::Mat GetRotation()
-        {
-            return prev_R;
-        }
-        int getFrames()
-        {
-            return n_frame;
-        }
-        cv::Mat GetTranslation()
-        {
-            return prev_T;
-        }
     
-
     private:
+
+        //ROS Variables and handles
         ros::NodeHandle nh_;
         image_transport::ImageTransport it_;
         image_transport::Subscriber imageSub_;
@@ -60,19 +61,14 @@ class monoodom
         ros::Subscriber camInfo_;
         tf::TransformBroadcaster tf_broadcaster;
         tf::StampedTransform transform;
-        // tf::Matrix3x3 _R;
         tf::Quaternion quat;
         nav_msgs::Odometry odom;
         geometry_msgs::Quaternion odom_quat;
-        // ros::Subscriber pose_sub;
-
-        std::vector<cv::Point2f> points1, points2;
 
         bool odomInit;
         bool calibInit;
-        
-        std::queue<sensor_msgs::ImageConstPtr>image_cache;
-        
+
+         //Variables for features and n_frames
         int max_features;
         int min_points;
         int max_frames;
@@ -81,8 +77,21 @@ class monoodom
         int flow;
         int prev_count;
         unsigned int id;
-
         double scale, focal;
+        
+        //Data structures for storing points, images
+        std::vector<cv::Point2f>prev_points;
+        std::vector<cv::Point2f>curr_points;
+        std::vector<cv::Point2f> points1, points2;
+        std::map<int, cv::Point2f>prev_points_map;
+        std::queue<sensor_msgs::ImageConstPtr>image_cache;
+        std::vector<uchar> status;
+        std::vector<int>idx;
+        std::string fn_images_;
+        std::string fn_calib_;
+        std::string fn_poses_;
+        
+        //CV variables
         cv::Point2f pp;
         cv::Mat image_traj;
         cv::Mat K, P, T;
@@ -98,16 +107,7 @@ class monoodom
         cv::Mat mask;
         cv::Mat odom_output;
         cv::Mat Img1, Img2;
-        cv_bridge::CvImagePtr cv_ptr;
-        std::map<int, cv::Point2f>prev_points_map;
-        std::vector<cv::Point2f>prev_points;
-        std::vector<cv::Point2f>curr_points;
-        std::vector<uchar> status;
-        std::vector<int>idx;
-        void ReduceVector(std::vector<int> &v);
-        std::string fn_images_;
-        std::string fn_calib_;
-        std::string fn_poses_;
+
 };
 
 #endif

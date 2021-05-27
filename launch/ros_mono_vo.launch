@@ -1,5 +1,5 @@
 <launch>
-  <node pkg="ros_mono_vo" type="ros_mono_vo" name="mono_vo"  output="screen" /> 
+  <node pkg="ros_mono_vo_kitti" type="ros_mono_vo" name="mono_vo"  output="screen" /> 
   <node pkg="rviz" type="rviz" name="rviz" args="-d $(find ros_mono_vo)/rviz/ros_mono_vo.rviz" output="screen" />
 </launch>
 

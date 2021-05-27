@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.0.2)
-project(ros_mono_vo)
+project(ros_mono_vo_kitti)
 
 add_compile_options(-std=c++11)
 

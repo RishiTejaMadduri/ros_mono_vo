@@ -4,6 +4,11 @@
 monoodom::monoodom():
 it_(nh_)
 {
+
+    fn_calib_ = "/media/rishi/bridge/data_odometry_color/sequences/00/calib.txt";
+    fn_poses_ = "/media/rishi/bridge/data_odometry_color/poses/00.txt";
+    fn_images_ =  "/media/rishi/bridge/data_odometry_color/sequences/00/image_2/";
+
     // camInfo_ = nh_.subscribe("/camera/rgb/camera_info", 1, &monoodom::getCalib, this);
     // imageSub_ = it_.subscribe("/camera/rgb/image_raw", 1, &monoodom::imageCallBack, this, image_transport::TransportHints("compressed"));
     // imagePub_ = it_.advertise("/mono_vo/output", 1);
@@ -19,10 +24,6 @@ it_(nh_)
     cv::namedWindow("Feature Tracking", cv::WINDOW_AUTOSIZE);
     cv::namedWindow("Trajectory", cv::WINDOW_AUTOSIZE);
 
-    fn_calib_ = "/media/rishi/bridge/data_odometry_color/sequences/00/calib.txt";
-    fn_poses_ = "/media/rishi/bridge/data_odometry_color/poses/00.txt";
-    fn_images_ =  "/media/rishi/bridge/data_odometry_color/sequences/00/image_2/";
-
     count = 0;
     flow = 0;
     prev_count = 0;
@@ -31,12 +32,21 @@ it_(nh_)
     imageCallBack();
 }
 
+/*
+    Function for adding zeros in a string for loading kitti files.
+*/
+
 std::string monoodom::AddZeroPadding(const int value, const unsigned precision) 
 {
   std::ostringstream oss;
   oss << std::setw(precision) << std::setfill('0') << value;
   return oss.str();
 }
+
+/* 
+    Function for computing the scale at different frames - Since monocular we have scale problem
+    @param nframe - ith frame. 
+*/
 
 double monoodom::compute_scale(int nframe)
 {
@@ -74,47 +84,59 @@ double monoodom::compute_scale(int nframe)
                       (z-prev_z)*(z-prev_z));
     return scale_;
 }
+/*
+    Function that converts ROS Sensor messages to OpenCV images and converts them to grayscale. - NOT BEING USED
+    @param Image1 - ROS Sensor message corresponding to first image .
+    @param Img1 - CV Mat that stores the OpenCV image of Image1 converted to grayscale.
+    @param Img2 - CV Mat that stores the OpenCV image of Image2 converted to grayscale - Is usually a dummy matrix/empty matrix if not the first iteration.
+    @param Image1 - ROS Sensor message corresponding to second image - Is usually a nullpointer if not the first iteration/initialization. 
+*/
 
-bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sensor_msgs::ImageConstPtr& Image2 = nullptr)
-{
-    cv_bridge::CvImageConstPtr cvbImg1, cvbImg2;
-    cv_bridge::CvImageConstPtr ImgPtr1;
-    ImgPtr1 = cv_bridge::toCvCopy(Image1);
-    curr_image = ImgPtr1->image;
-    if(!Image2)
-    {
-        try
-        {
-            cvbImg1 = cv_bridge::toCvCopy(Image1);
-        }
-        catch(const std::exception& e)
-        {
-            ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
-            return false;
-        }
-        cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
-        return true;
-    }
-    else
-    {
-        try
-        {
-            cvbImg1 = cv_bridge::toCvCopy(Image1);
-            cvbImg2 = cv_bridge::toCvCopy(Image2);
-        }
-        catch(const std::exception& e)
-        {
-            ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
-            return false;
-        }
-        cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
-        cv::cvtColor(cvbImg2->image, Img2, cv::COLOR_BGR2GRAY);
+// bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sensor_msgs::ImageConstPtr& Image2 = nullptr)
+// {
+//     cv_bridge::CvImageConstPtr cvbImg1, cvbImg2;
+//     cv_bridge::CvImageConstPtr ImgPtr1;
+//     ImgPtr1 = cv_bridge::toCvCopy(Image1);
+//     curr_image = ImgPtr1->image;
+//     if(!Image2)
+//     {
+//         try
+//         {
+//             cvbImg1 = cv_bridge::toCvCopy(Image1);
+//         }
+//         catch(const std::exception& e)
+//         {
+//             ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
+//             return false;
+//         }
+//         cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
+//         return true;
+//     }
+//     else
+//     {
+//         try
+//         {
+//             cvbImg1 = cv_bridge::toCvCopy(Image1);
+//             cvbImg2 = cv_bridge::toCvCopy(Image2);
+//         }
+//         catch(const std::exception& e)
+//         {
+//             ROS_ERROR("CV BRIDGE EXCEPTION: %s ", e.what());
+//             return false;
+//         }
+//         cv::cvtColor(cvbImg1->image, Img1, cv::COLOR_BGR2GRAY);
+//         cv::cvtColor(cvbImg2->image, Img2, cv::COLOR_BGR2GRAY);
 
-        return true;
-    }
+//         return true;
+//     }
 
-    return false;
-}
+//     return false;
+// }
+
+    /*
+        A callback function for the Camera info subscriber - 
+        focal, pp and K are initialized here. 
+    */
     void monoodom::getCalib()
     // void monoodom::getCalib(const sensor_msgs::CameraInfoConstPtr& info)
     {
@@ -167,23 +189,13 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
     }
 
-    void monoodom::kptsBucketing(std::vector<cv::Point2f>& keyPoints, std::vector<cv::KeyPoint>& kptsBuckted)
-    {
-        for(int i = 0; i<2000; i++)
-        {
-            keyPoints.push_back(kptsBuckted[i].pt);
-        }
-        //std::cout<<"kptsBucketing: srcKpts"<<srcKpts.size()<<std::endl;
-    }
-
-    bool score_comparator(const cv::KeyPoint& p1, const cv::KeyPoint& p2)
-    {
-        return p1.response > p2.response;
-    }
+    /*
+        Feature detection function for detecting fast features.
+        @param Img1 - A CV Mat corresponding to Image in which features must be detected.
+        @param keyPoints - detected features are stored in the keypoints array. 
+    */
     void monoodom::FeatureDetection(cv::Mat Img1, std::vector<cv::Point2f>& keyPoints)
     {
-
-        //std::cout<<"featureDetection"<<std::endl;
 
         std::vector<cv::KeyPoint> kptsBuckted;
         int fast_threshold = 20;
@@ -200,6 +212,13 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
     }
 
+    /*
+        Feature Tracking function for tracking features into subsequent images. 
+        @param Img1 - A CV Mat corresponding to Image in which features were initially detected.
+        @param Img2 - A CV Mat corresponding to Image in which features will be tracked from Img1.
+        @param keyPoints1 - A vector with stored keyPoints from Img1.
+        @param keyPoints2 - A vector with stored keyPoints from Img2.
+    */
     void monoodom::FeatureMatching(cv::Mat Img1, cv::Mat Img2, std::vector<cv::Point2f>& keyPoints1, std::vector<cv::Point2f>& keyPoints2)
     {
         std::vector<float>err;
@@ -223,31 +242,25 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
                 indexCorrection++;
             }
         }
-        //std::cout<<"End of For loop"<<std::endl;
     }
 
+    /*
+        Function to verify the validty of a rotation matrix R*Rt = I
+        @param R - A CV Mat.
+    */
     bool monoodom::IsRotMat(cv::Mat &R) 
     {
-    cv::Mat Rt;
-    transpose(R, Rt);
-    cv::Mat shouldBeIdentity = Rt * R;
-    cv::Mat I = cv::Mat::eye(3,3, shouldBeIdentity.type());
+        cv::Mat Rt;
+        transpose(R, Rt);
+        cv::Mat shouldBeIdentity = Rt * R;
+        cv::Mat I = cv::Mat::eye(3,3, shouldBeIdentity.type());
 
-    return norm(I, shouldBeIdentity) < 1e-6;
+        return norm(I, shouldBeIdentity) < 1e-6;
     }
-
-    void monoodom::ReduceVector(std::vector<int> &v) 
-    {
-        int j=0;
-
-        for(int i=0; i<int(v.size()); i++) {
-            if(status[i]) {
-            v[j++] = v[i];
-            }
-        }
-        v.resize(j);
-    }
-
+    /*
+        Function to convert rotation matrix to Euler Angles
+        @param R - A CV Mat.
+    */
     cv::Vec3f monoodom::RotMatToEuler(cv::Mat &R, bool flag) 
     {
         assert(IsRotMat(R));
@@ -278,6 +291,8 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
 
         return cv::Vec3f(x, y, z);
     }
+    //############### DEAD CODE BEGIN ###############
+
     // void print_t(cv::Mat &R)
     // {
     //     std::string DIR = "/home/rishi/catkin_ws/src/ros_mono_vo/src/data_r.txt";
@@ -403,6 +418,24 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
     //          }
     //      }
     // }
+    //############### DEAD CODE END ###############
+
+    /*
+        The main Image call back function that accepts ROS ImageConstPtr message. 
+        -During the initialization phase 
+        - Store images messages in a image_cache
+        - Ensure cache size is greater than 2. 
+        - Conver image messages to OpenCV BGR8 Image
+        - Perform feature detction and Feature tracking
+        - Estimate Essential Matrix and Recover Pose.
+        -Initialize the odometry pipeline.
+
+        -After Initialization
+        - Track features into each sub-sequent images. 
+        - Estimate essential matrix
+        - Recover pose
+        - Visualize.
+    */
     void monoodom::imageCallBack()
     {
         if(!calibInit)
@@ -486,7 +519,13 @@ bool monoodom::convertImages(const sensor_msgs::ImageConstPtr& Image1, const sen
             // sleep(1);
          }
     }
-
+    
+    /*
+        A visualization function that plots trajectory and also publishes the odometry on RVIZ.
+        -Tracks previous and curr feature points and plots them on the image stream to visualize features being tracked
+        -Converts rotation matrix to euler angles and prints the rotation and translation.
+        -Uses TF broadcast to set a frame of reference for rviz and publishes odometry. 
+    */
     void monoodom::visualize(int n_frame)
     {
         cv::Mat traj = cv::Mat::zeros(cv::Size(1241,376), CV_8UC3);

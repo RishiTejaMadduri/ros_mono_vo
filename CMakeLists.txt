@@ -36,9 +36,9 @@ ${Eigen_INCLUDE_DIRS}
 #############
 
 
-add_executable(ros_mono_vo 
-	src/mono_vo.cpp
-	src/mono_odom.cpp
-)
-target_link_libraries(ros_mono_vo ${catkin_LIBRARIES} ${Eigen_LIBRARIES})
+#add_executable(ros_mono_vo 
+#	src/mono_vo.cpp
+#	src/mono_odom.cpp
+#)
+#target_link_libraries(ros_mono_vo ${catkin_LIBRARIES} ${Eigen_LIBRARIES})
 

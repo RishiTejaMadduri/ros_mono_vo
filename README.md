@@ -19,7 +19,7 @@ cd ..
 catkin_make
 ```
 ```
-roslaunch roslaunch ros_mono_vo_kitti ros_mono_vo.launch 
+roslaunch roslaunch ros_mono_vo ros_mono_vo.launch 
 ```
 
 ## References:
